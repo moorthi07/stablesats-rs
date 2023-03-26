@@ -1213,6 +1213,7 @@ name = "galoy-client"
 version = "0.9.4-dev"
 dependencies = [
  "anyhow",
+ "async-trait",
  "chrono",
  "futures",
  "graphql_client",

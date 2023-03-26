@@ -44,6 +44,29 @@ pub struct OnchainAddress {
     pub address: String,
 }
 
+
+#[async_trait]
+pub trait WalletClient {
+    async  fn onchain_address(&self) -> Result<OnchainAddress, WalletError>;
+    async  fn send_onchain_payment(
+        &self,
+        destination: String,
+        amount_in_sats: Decimal,
+        memo: Option<String>,
+        confirmations: usize,
+    ) -> Result<(), WalletError>;
+}
+
+#[derive(Debug)]
+pub struct OnchainAddress {
+    pub address: String,
+}
+
+pub struct WalletError {
+    pub error: String,
+}
+
+
 impl GaloyClient {
     pub async fn connect(config: GaloyClientConfig) -> Result<Self, GaloyClientError> {
         let jwt = Self::login_jwt(config.clone()).await?;
@@ -213,6 +236,9 @@ impl GaloyClient {
 
         WalletBalances::try_from(result)
     }
+    
+
+  
 
     #[instrument(name = "galoy_client.onchain_address", skip(self), err)]
     pub async fn onchain_address(&self) -> Result<OnchainAddress, GaloyClientError> {
