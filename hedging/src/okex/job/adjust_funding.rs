@@ -1,8 +1,9 @@
+use async_trait::async_trait;
 use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
 use tracing::instrument;
 
-use galoy_client::*;
+
 use okex_client::*;
 use shared::pubsub::CorrelationId;
 
@@ -10,18 +11,42 @@ use crate::{error::*, okex::*};
 
 const SATS_PER_BTC: Decimal = dec!(100_000_000);
 
+
+
+ #[async_trait]
+pub trait WalletClient {
+    async  fn onchain_address(&self) -> Result<OnchainAddress, WalletError>;
+    async  fn send_onchain_payment(
+        &self,
+        destination: String,
+        amount_in_sats: Decimal,
+        memo: Option<String>,
+        confirmations: usize,
+    ) -> Result<(), WalletError>;
+}
+
+#[derive(Debug)]
+pub struct OnchainAddress {
+    pub address: String,
+}
+
+pub struct WalletError {
+    pub error: String,
+}
+
+
 #[instrument(name = "hedging.okex.job.adjust_funding", skip_all, fields(correlation_id = %correlation_id,
-        target_liability, current_position, last_price_in_usd_cents, funding_available_balance,
-        trading_available_balance, onchain_fees, action, client_transfer_id,
-        transferred_funding, lag_ok), err)]
-pub(super) async fn execute(
-    correlation_id: CorrelationId,
-    pool: &sqlx::PgPool,
-    ledger: ledger::Ledger,
-    okex: OkexClient,
-    okex_transfers: OkexTransfers,
-    galoy: GaloyClient,
-    funding_adjustment: FundingAdjustment,
+    target_liability, current_position, last_price_in_usd_cents, funding_available_balance,
+    trading_available_balance, onchain_fees, action, client_transfer_id,
+    transferred_funding, lag_ok), err)]
+pub(super) async fn execute<W: WalletClient>(
+correlation_id: CorrelationId,
+pool: &sqlx::PgPool,
+ledger: ledger::Ledger,
+okex: OkexClient,
+okex_transfers: OkexTransfers,
+wallet: W,
+funding_adjustment: FundingAdjustment,
 ) -> Result<(), HedgingError> {
     let span = tracing::Span::current();
     if !crate::hack_user_trades_lag::lag_ok(pool).await? {
@@ -138,7 +163,7 @@ pub(super) async fn execute(
                         shared: &shared,
                         action_size: Some(amount),
                         fee: Decimal::ZERO,
-                        transfer_from: "galoy".to_string(),
+                        transfer_from: "galoy".to_string(), //need to change
                         transfer_to: deposit_address.clone(),
                     };
                     if let Some(client_id) =
@@ -151,13 +176,13 @@ pub(super) async fn execute(
 
                         let amount_in_sats = amount * SATS_PER_BTC;
                         let memo: String = format!("deposit of {amount_in_sats} sats to OKX");
-                        let _ = galoy
+                        let _ = wallet
                             .send_onchain_payment(deposit_address, amount_in_sats, Some(memo), 1)
                             .await?;
                     }
                 }
                 OkexFundingAdjustment::OnchainWithdraw(amount) => {
-                    let deposit_address = galoy.onchain_address().await?.address;
+                    let deposit_address = wallet.onchain_address().await?.address;
                     let reservation = TransferReservation {
                         shared: &shared,
                         action_size: Some(amount),
@@ -184,3 +209,5 @@ pub(super) async fn execute(
     };
     Ok(())
 }
+
+ 

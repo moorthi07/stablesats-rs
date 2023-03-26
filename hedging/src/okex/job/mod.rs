@@ -2,6 +2,8 @@ mod adjust_funding;
 mod adjust_hedge;
 mod poll_okex;
 
+use async_trait::async_trait;
+use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use sqlx::{Executor, Postgres};
 use sqlxmq::{job, CurrentJob, JobBuilder};
@@ -10,7 +12,7 @@ use uuid::{uuid, Uuid};
 
 use std::collections::HashMap;
 
-use galoy_client::GaloyClient;
+
 use okex_client::OkexClient;
 use shared::{
     pubsub::{CorrelationId, Publisher},
@@ -164,13 +166,36 @@ pub async fn spawn_adjust_funding<'a>(
     }
 }
 
+
+#[async_trait]
+pub trait WalletClient {
+    async  fn onchain_address(&self) -> Result<OnchainAddress, WalletError>;
+    async  fn send_onchain_payment(
+        &self,
+        destination: String,
+        amount_in_sats: Decimal,
+        memo: Option<String>,
+        confirmations: usize,
+    ) -> Result<(), WalletError>;
+}
+
+#[derive(Debug)]
+pub struct OnchainAddress {
+    pub address: String,
+}
+
+pub struct WalletError {
+    pub error: String,
+}
+
+
 #[job(name = "adjust_funding")]
-pub(super) async fn adjust_funding(
+pub(super) async fn adjust_funding<W: WalletClient>(
     mut current_job: CurrentJob,
     ledger: ledger::Ledger,
     okex: OkexClient,
     okex_transfers: OkexTransfers,
-    galoy: GaloyClient,
+    wallet: W,
     funding_adjustment: FundingAdjustment,
 ) -> Result<(), HedgingError> {
     let pool = current_job.pool().clone();
@@ -185,7 +210,7 @@ pub(super) async fn adjust_funding(
                 ledger,
                 okex,
                 okex_transfers,
-                galoy,
+                wallet,
                 funding_adjustment,
             )
             .await?;
